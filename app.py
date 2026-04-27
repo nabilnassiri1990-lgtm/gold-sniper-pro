@@ -4,6 +4,8 @@ import pandas as pd
 import datetime
 import requests
 import time
+TOKEN = st.secrets.get("TELEGRAM_TOKEN")
+CHAT_ID = st.secrets.get("TELEGRAM_CHAT_ID")
 
 st.set_page_config(page_title="Quant Gold Sniper Pro", page_icon="🏹")
 st.title("🏹 Quant Gold Sniper Pro")
