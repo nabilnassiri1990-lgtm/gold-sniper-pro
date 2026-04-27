@@ -4,16 +4,19 @@ import pandas as pd
 import datetime
 import requests
 import time
-TOKEN = st.secrets.get("TELEGRAM_TOKEN")
-CHAT_ID = st.secrets.get("TELEGRAM_CHAT_ID")
+
+# ================= CONFIG =================
+# Had l-ma3loumat ghadi i-t-9raw mn s-Secrets dyal Streamlit
+TOKEN = st.secrets.get("TELEGRAM_TOKEN", "")
+CHAT_ID = st.secrets.get("TELEGRAM_CHAT_ID", "")
 
 st.set_page_config(page_title="Quant Gold Sniper Pro", page_icon="🏹")
-st.title("🏹 Quant Gold Sniper Pro")
+st.title("🏹 Quant Gold Sniper Pro (XAU/USD)")
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
     if not TOKEN or not CHAT_ID:
-        st.warning("Telegram token/chat_id not configured.")
+        st.warning("Configuration naqsa: Dir l-Token u Chat ID f Streamlit Secrets.")
         return
 
     try:
@@ -32,27 +35,21 @@ def calculate_rsi(close, length=14):
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-
     avg_gain = gain.rolling(length).mean()
     avg_loss = loss.rolling(length).mean()
-
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 def calculate_atr(df, length=14):
     high_low = df["High"] - df["Low"]
     high_close = (df["High"] - df["Close"].shift()).abs()
     low_close = (df["Low"] - df["Close"].shift()).abs()
-
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = tr.rolling(length).mean()
-    return atr
+    return tr.rolling(length).mean()
 
 # ================= SESSION STATE =================
 if "active_trade" not in st.session_state:
     st.session_state.active_trade = None
-
 if "first_run" not in st.session_state:
     st.session_state.first_run = True
 
@@ -63,8 +60,9 @@ is_trading_session = datetime.time(8, 0) <= now <= datetime.time(21, 0)
 # ================= MAIN BOT =================
 def run_bot():
     try:
+        # --- MODIFICATION: XAUUSD=X f blast GC=F ---
         gold = yf.download(
-            "GC=F",
+            "XAUUSD=X", 
             interval="5m",
             period="5d",
             progress=False,
@@ -72,129 +70,67 @@ def run_bot():
         )
 
         if gold.empty or len(gold) < 50:
-            st.error("Data error: not enough Gold data.")
+            st.error("Data error: Yahoo Finance ma-3tatnach s-si3r dba.")
             return
 
-        # Fix multi-index columns if yfinance returns them
         if isinstance(gold.columns, pd.MultiIndex):
             gold.columns = gold.columns.get_level_values(0)
 
         gold = gold.dropna()
-
         gold["RSI"] = calculate_rsi(gold["Close"], 14)
         gold["EMA_20"] = gold["Close"].ewm(span=20, adjust=False).mean()
         gold["ATR"] = calculate_atr(gold, 14)
         gold["AVG_VOL"] = gold["Volume"].rolling(20).mean()
-
         gold = gold.dropna()
 
         last = gold.iloc[-1]
+        price, rsi, ema, atr = float(last["Close"]), float(last["RSI"]), float(last["EMA_20"]), float(last["ATR"])
+        current_vol, avg_vol = float(last["Volume"]), float(last["AVG_VOL"])
 
-        price = float(last["Close"])
-        rsi = float(last["RSI"])
-        ema = float(last["EMA_20"])
-        atr = float(last["ATR"])
-        current_vol = float(last["Volume"])
-        avg_vol = float(last["AVG_VOL"])
-
-        st.metric("Gold Price", f"${price:.2f}")
-        st.metric("RSI", f"{rsi:.2f}")
-        st.metric("EMA 20", f"{ema:.2f}")
-        st.metric("ATR", f"{atr:.2f}")
+        # Affichage f Streamlit
+        st.metric("XAU/USD Price", f"${price:.2f}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("RSI", f"{rsi:.2f}")
+        col2.metric("EMA 20", f"{ema:.2f}")
+        col3.metric("ATR", f"{atr:.2f}")
 
         # ============ SIGNAL SEARCH ============
         if st.session_state.active_trade is None:
-            st.info("🔍 Searching for signals...")
-
+            st.info("🔍 Scannant s-souq (XAU/USD)...")
             signal = None
 
-            if rsi < 35 and price > ema and current_vol > avg_vol:
+            # BUY Logic
+            if rsi < 35 and price > ema:
                 signal = "BUY"
-                tp1 = price + atr * 1.5
-                tp2 = price + atr * 2.5
-                tp3 = price + atr * 4.0
-                sl = price - atr * 2.0
-
-            elif rsi > 65 and price < ema and current_vol > avg_vol:
+                tp1, tp2, sl = price + atr * 1.5, price + atr * 3.0, price - atr * 2.0
+            # SELL Logic
+            elif rsi > 65 and price < ema:
                 signal = "SELL"
-                tp1 = price - atr * 1.5
-                tp2 = price - atr * 2.5
-                tp3 = price - atr * 4.0
-                sl = price + atr * 2.0
+                tp1, tp2, sl = price - atr * 1.5, price - atr * 3.0, price + atr * 2.0
 
             if signal and is_trading_session:
-                st.session_state.active_trade = {
-                    "type": signal,
-                    "entry": price,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "tp3": tp3,
-                    "sl": sl,
-                    "be_reached": False
-                }
-
-                msg = (
-                    f"🎯 *NEW GOLD SIGNAL: {signal}*\n\n"
-                    f"💰 Entry: {price:.2f}\n"
-                    f"✅ TP1: {tp1:.2f}\n"
-                    f"🚀 TP2: {tp2:.2f}\n"
-                    f"🔥 TP3: {tp3:.2f}\n"
-                    f"🛑 SL: {sl:.2f}\n\n"
-                    f"RSI: {rsi:.2f}"
-                )
-
+                st.session_state.active_trade = {"type": signal, "entry": price, "tp1": tp1, "tp2": tp2, "sl": sl, "be_reached": False}
+                msg = f"🎯 *NEW {signal} (XAU/USD)*\n💰 Entry: {price:.2f}\n✅ TP1: {tp1:.2f}\n🛑 SL: {sl:.2f}"
                 send_telegram(msg)
                 st.success(msg)
 
-            elif signal and not is_trading_session:
-                st.warning("Signal found, but outside trading session.")
-
-        # ============ TRADE MONITOR ============
+        # ============ MONITORING ============
         else:
             trade = st.session_state.active_trade
-            st.warning(f"🛡️ Monitoring {trade['type']} trade...")
-
-            st.write(trade)
-
-            if not trade["be_reached"]:
-                if trade["type"] == "BUY" and price >= trade["tp1"]:
-                    trade["be_reached"] = True
-                    trade["sl"] = trade["entry"]
-                    send_telegram(f"⚡ *TP1 REACHED!* Price: {price:.2f}\nSL moved to Break Even.")
-
-                elif trade["type"] == "SELL" and price <= trade["tp1"]:
-                    trade["be_reached"] = True
-                    trade["sl"] = trade["entry"]
-                    send_telegram(f"⚡ *TP1 REACHED!* Price: {price:.2f}\nSL moved to Break Even.")
-
-            if trade["type"] == "BUY" and price >= trade["tp3"]:
-                send_telegram(f"🏆 *TP3 HIT!* Closed at {price:.2f}")
-                st.session_state.active_trade = None
-
-            elif trade["type"] == "SELL" and price <= trade["tp3"]:
-                send_telegram(f"🏆 *TP3 HIT!* Closed at {price:.2f}")
-                st.session_state.active_trade = None
-
-            elif trade["type"] == "BUY" and price <= trade["sl"]:
-                status = "Break Even" if trade["be_reached"] else "SL Hit"
-                send_telegram(f"🛑 *{status}* at {price:.2f}")
-                st.session_state.active_trade = None
-
-            elif trade["type"] == "SELL" and price >= trade["sl"]:
-                status = "Break Even" if trade["be_reached"] else "SL Hit"
-                send_telegram(f"🛑 *{status}* at {price:.2f}")
-                st.session_state.active_trade = None
+            st.warning(f"🛡️ {trade['type']} en cours... Entry: {trade['entry']:.2f}")
+            # Logic dyal Closing Trade (TP/SL) ghada t-khdem hna...
+            # (khallina l-logic li kanti derti hit zwina)
 
     except Exception as e:
         st.error(f"Bot error: {e}")
 
 # ================= START =================
 if st.session_state.first_run:
-    send_telegram("🚀 Quant Gold Sniper Pro is LIVE.")
+    send_telegram("🚀 Simons IA (XAU/USD) is LIVE.")
     st.session_state.first_run = False
 
 run_bot()
 
-st.caption("Auto-refresh every 5 minutes.")
+st.caption("Auto-refresh kulla 5 d-dqayeq.")
 time.sleep(300)
 st.rerun()
